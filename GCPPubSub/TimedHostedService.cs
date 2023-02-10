@@ -2,26 +2,23 @@ using Google.Cloud.PubSub.V1;
 
 namespace GCPPubSub;
 
-public class TimedHostedService : IHostedService, IDisposable
+public class TimedHostedService : BackgroundService
 {
-    private int executionCount = 0;
     private readonly ILogger<TimedHostedService> _logger;
-    private Timer? _timer = null;
 
     public TimedHostedService(ILogger<TimedHostedService> logger)
     {
         _logger = logger;
     }
 
-    public Task StartAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Timed Hosted Service running.");
-        
-        _timer = new Timer(PullMessages, null, TimeSpan.Zero, TimeSpan.FromSeconds(5));
-        return Task.CompletedTask;
+        _logger.LogInformation("GcpPubSubHostedService is startting.");
+        await PullMessages(stoppingToken);
     }
 
-    private void PullMessages(object? _object)
+
+    private Task PullMessages(CancellationToken stoppingToken)
     {
         var projectId = "clean-skill-374402";
         var subscriptionId = "gkeupdate";
@@ -30,28 +27,23 @@ public class TimedHostedService : IHostedService, IDisposable
         var subscriptionName = SubscriptionName.FromProjectSubscription(projectId, subscriptionId);
         var subscriber = SubscriberClient.Create(subscriptionName);
 
-        subscriber.StartAsync((PubsubMessage message, CancellationToken cancel) =>
+        return subscriber.StartAsync((PubsubMessage message, CancellationToken cancel) =>
         {
             var result = System.Text.Encoding.UTF8.GetString(message.Data.ToArray());
+
+            // 這邊可以呼叫其他服務
             Console.WriteLine(
                 $"[{DateTimeOffset.Now}]{result}@{message.PublishTime.ToDateTimeOffset()} from {message.Attributes["cluster_name"]}");
 
+            // 下面是用來處理呼叫其他服務後的結果，再決定是否要 ack 刪除通知
             return Task.FromResult(acknowledge ? SubscriberClient.Reply.Ack : SubscriberClient.Reply.Nack);
-        }).GetAwaiter().GetResult();
-        
-    }
-    
-    public Task StopAsync(CancellationToken stoppingToken)
-    {
-        _logger.LogInformation("Timed Hosted Service is stopping.");
-
-        _timer?.Change(Timeout.Infinite, 0);
-
-        return Task.CompletedTask;
+        });
     }
 
-    public void Dispose()
+    public override async Task StopAsync(CancellationToken stoppingToken)
     {
-        _timer?.Dispose();
+        _logger.LogInformation("Consume Scoped Service Hosted Service is stopping.");
+
+        await base.StopAsync(stoppingToken);
     }
 }
